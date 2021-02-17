@@ -41,7 +41,7 @@ class HelpCommand implements Command {
 		for (const command of registeredCommands.commands) {
 			lines.push(
 				`_:prefix:${command.getKeywords()[0]}_`,
-				`\t${command.getSummary()}\n`,
+				`${command.getSummary()}\n`,
 			);
 		}
 

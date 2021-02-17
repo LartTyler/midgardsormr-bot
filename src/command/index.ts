@@ -43,6 +43,13 @@ export class ArgInput {
 	}
 
 	/**
+	 * Advances the position to the next element, then returns the value at the new position in the argument list.
+	 */
+	public skip() {
+		return this.args[++this.index];
+	}
+
+	/**
 	 * Returns the value at the current position in the argument list. Does not change which position the argument list
 	 * is currently at.
 	 */

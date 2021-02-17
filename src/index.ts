@@ -1,10 +1,10 @@
 import {Client, Message, NewsChannel, TextChannel} from 'discord.js';
-import {ArgInput, CommandContext} from './command';
 import * as commands from './command';
+import {ArgInput, CommandContext} from './command';
 import {logger} from './logger';
 import {Server, ServerInterface} from './models/Server';
 import * as mongoose from './mongoose';
-import {parseMention} from './utility/discord';
+import * as autoroleTimer from './timers/autorole';
 
 if (!process.env.MONGO_URI) {
 	logger.error('You must define a Mongo connection via the MONGO_URI environment variable');
@@ -73,6 +73,8 @@ client.on('message', async message => {
 client.login(process.env.DISCORD_APP_TOKEN)
 	.then(() => {
 		logger.info('Bot logged in to Discord servers');
+
+		autoroleTimer.start(client);
 	})
 	.catch(error => {
 		logger.error('Could not log in to Discord servers; reason: ' + error);

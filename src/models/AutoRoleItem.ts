@@ -48,5 +48,3 @@ export const AutoRoleItemSchema = new Schema({
 		},
 	}),
 });
-
-

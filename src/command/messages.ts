@@ -2,7 +2,7 @@ import {oneLine} from 'common-tags';
 import exp from 'constants';
 import {MentionType} from '../utility/discord';
 import {getIndefiniteArticle, joinWithConjunction} from '../utility/string';
-import {Command, CommandContext, registeredCommands} from './index';
+import {Command, CommandContext, registeredCommands, replaceCommandPrefixPlaceholder} from './index';
 
 export function getHelpCommandText(command: string = ''): string | undefined {
 	const helpCommand = registeredCommands.getHelpCommand();
@@ -32,7 +32,7 @@ export function getInvalidCommandInvocationMessage(context: CommandContext, comm
 	if (helpCommandText)
 		output.push(` For help, try \`${helpCommandText}\`.`);
 
-	return output.join('');
+	return replaceCommandPrefixPlaceholder(output, context.server.prefix).join('');
 }
 
 export function getUnexpectedMentionType(

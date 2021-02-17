@@ -28,8 +28,12 @@ export function joinWithConjunction(conjunction: string, items: string[]) {
 }
 
 export function interpolate(input: string, values: {[key: string]: string}) {
-	for (const key in Object.keys(values))
+	for (const key in values)
 		input = input.replaceAll(`:${key}:`, values[key]);
 
 	return input;
+}
+
+export function ucfirst(input: string): string {
+	return input.charAt(0).toUpperCase() + input.substring(1);
 }

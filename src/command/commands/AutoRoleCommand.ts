@@ -1,8 +1,10 @@
 import {stripIndent} from 'common-tags';
+import {MessageEmbed} from 'discord.js';
 import ms from 'ms';
 import {AutoRoleAction, AutoRoleItemNotificationInterface} from '../../models/AutoRoleItem';
-import {MentionType, parseMention} from '../../utility/discord';
-import {ArgInput, Command, CommandContext, Commands} from '../index';
+import {Emoji, MentionType, parseMention} from '../../utility/discord';
+import {ucfirst} from '../../utility/string';
+import {ArgInput, Command, CommandContext, Commands, replaceCommandPrefixPlaceholder} from '../index';
 import {getInvalidCommandInvocationMessage, getUnexpectedMentionType, getUnrecognizedCommandMessage} from '../messages';
 
 class AutoRoleCommand implements Command {
@@ -14,7 +16,7 @@ class AutoRoleCommand implements Command {
 		return [
 			':prefix:autorole {add | remove} <@role> <delay> [notify <@user | #channel> [<message>]]',
 			':prefix:autorole list',
-			':prefix:autorole delete <id>',
+			':prefix:autorole delete <index | @role>',
 			':prefix:autorole clear',
 		];
 	}
@@ -26,33 +28,44 @@ class AutoRoleCommand implements Command {
 	public getHelpText(): string {
 		return stripIndent`
 			**add, remove**
-				Performs the requested action using the specified role. The \`<delay>\` argument can be any positive integer, followed by a unit (such as minutes, hours, etc).
-				
-				If the action should be performed immediately when the user joins the server, you can use "immediate" for the delay.
+			Performs the requested action using the specified role. The \`<delay>\` argument can be any positive integer, followed by a unit (such as minutes, hours, etc).
+
+			If the action should be performed immediately when the user joins the server, you can use "immediate" for the delay.
 
 			**list**
-				Lists all current autorole items. Each line is prefixed with the item's ID, which can be used with the **:prefix:autorole delete** command to delete an item.
+			Lists all current autorole items. Each line is prefixed with the item's index, which can be used with the **:prefix:autorole delete** command to delete an item.
 
 			**delete**
-				Deletes an item from the autorole settings. The ID can be obtained by using the **:prefix:autorole list** command.
+			Deletes an item from the autorole settings. The index can be obtained by using the **:prefix:autorole list** command. If a role is provided instead, all items that use that role will be deleted instead.
+
+			Please be aware that deleting an item may cause the index of other items to change, so you should check the output of **:prefix:autorole list** each time you go to run this command.
 
 			**clear**
-				Deletes all items from the autorole configuration.
+			Deletes all items from the autorole configuration.
 		`;
 	}
 
 	public async execute(args: ArgInput, context: CommandContext): Promise<void> {
-		switch (args.current) {
-			case AutoRoleAction.ADD:
-			case AutoRoleAction.REMOVE:
-				return this.executeAddOrRemove(args.next() as AutoRoleAction, args, context);
+		const current = args.next();
 
-			// TODO Implement `list` subcommand
-			// TODO Implement `delete` subcommand
-			// TODO Implement `clear` subcommand
+		switch (current) {
+			case 'add':
+			case 'remove':
+				return this.executeAddOrRemove(current as AutoRoleAction, args, context);
+
+			case 'list':
+				return this.executeList(context);
+
+			case 'delete':
+				return this.executeDelete(args, context);
+
+			case 'clear':
+				return this.executeClear(context);
 
 			default:
-				await context.message.reply(getUnrecognizedCommandMessage(args.current));
+				await context.message.reply(replaceCommandPrefixPlaceholder([
+					getUnrecognizedCommandMessage(this.getKeywords()[0]),
+				], context.server.prefix));
 		}
 	}
 
@@ -68,7 +81,7 @@ class AutoRoleCommand implements Command {
 	 * @param context
 	 */
 	public async executeAddOrRemove(action: AutoRoleAction, args: ArgInput, context: CommandContext): Promise<void> {
-		if (args.length <= 2) {
+		if (args.remaining < 2) {
 			await context.message.reply(getInvalidCommandInvocationMessage(context, this));
 
 			return;
@@ -112,7 +125,7 @@ class AutoRoleCommand implements Command {
 				return;
 			}
 
-			let message = ':user: has been :action: to :role:.';
+			let message = null;
 
 			if (args.remaining >= 1) {
 				let parts: string[] = [];
@@ -138,6 +151,92 @@ class AutoRoleCommand implements Command {
 		});
 
 		await context.server.save();
+		await context.message.react(Emoji.CHECKMARK);
+	}
+
+	protected async executeList(context: CommandContext) {
+		if (context.server.autoRoleItems.length === 0) {
+			await context.channel.send('There are no autorole items configured right now.');
+
+			return;
+		}
+
+		const actions: string[] = [];
+		const delays: string[] = [];
+
+		for (const item of context.server.autoRoleItems) {
+			actions.push(`${ucfirst(item.action)} <@&${item.role}>`);
+			delays.push(item.delay === 0 ? 'Immediate' : ms(item.delay, {long: true}));
+		}
+
+		const message = new MessageEmbed();
+		message
+			.setTitle('Autorole Items')
+			.addField('Index', actions.map((_, index) => index + 1), true)
+			.addField('Action', actions, true)
+			.addField('Delay', delays, true);
+
+		await context.channel.send(message);
+	}
+
+	protected async executeDelete(args: ArgInput, context: CommandContext) {
+		console.log(args);
+		if (args.remaining < 1) {
+			await context.message.reply(getInvalidCommandInvocationMessage(context, this, 'delete'));
+
+			return;
+		}
+
+		const input = args.next();
+		const [mentionType, mentionId] = parseMention(input);
+
+		if (mentionType !== MentionType.NONE) {
+			if (mentionType !== MentionType.ROLE) {
+				await context.message.reply(getUnexpectedMentionType(args.position - 1, MentionType.ROLE, mentionType));
+
+				return;
+			}
+
+			const remove = context.server.autoRoleItems.filter(item => item.role === mentionId);
+
+			for (const item of remove)
+				item.remove();
+		} else {
+			const index = parseInt(input, 10);
+
+			if (isNaN(index)) {
+				await context.message.reply(
+					'You need to provide either a role or an item index in order to delete items from the autorole configuration.',
+				);
+
+				return;
+			} else if (index < 1) {
+				await context.message.reply('Index must be a positive integer.');
+
+				return;
+			} else if (index > context.server.autoRoleItems.length) {
+				await context.message.reply('Index cannot be greater than the number of auto role items.');
+
+				return;
+			}
+
+			context.server.autoRoleItems[index - 1].remove();
+		}
+
+		await context.server.save();
+
+		await context.message.react(Emoji.CHECKMARK);
+
+		if (context.server.autoRoleItems.length > 0)
+			await this.executeList(context);
+	}
+
+	protected async executeClear(context: CommandContext): Promise<void> {
+		context.server.autoRoleItems.remove();
+		await context.server.save();
+
+		await context.message.react(Emoji.CHECKMARK);
+		await context.channel.send('All auto role items have been deleted.');
 	}
 }
 

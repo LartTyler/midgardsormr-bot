@@ -31,3 +31,7 @@ export function parseMention(input: string): [MentionType, string | undefined] {
 			throw new Error('Unrecognized mention prefix "' + prefix + '"');
 	}
 }
+
+export const Emoji = {
+	CHECKMARK: '✅',
+};

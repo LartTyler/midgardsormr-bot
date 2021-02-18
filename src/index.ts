@@ -1,10 +1,10 @@
-import {Client, Message, NewsChannel, TextChannel} from 'discord.js';
+import {Client, Message} from 'discord.js';
 import * as commands from './command';
-import {ArgInput, CommandContext} from './command';
+import {ArgInput} from './command';
 import {logger} from './logger';
-import {Server, ServerInterface} from './models/Server';
+import {ServerInterface} from './models/Server';
+import * as modules from './module';
 import * as mongoose from './mongoose';
-import * as autoroleTimer from './timers/autorole';
 
 if (!process.env.MONGO_URI) {
 	logger.error('You must define a Mongo connection via the MONGO_URI environment variable');
@@ -24,67 +24,33 @@ if (!process.env.DISCORD_APP_TOKEN) {
 	process.exit(1);
 }
 
-commands.init().catch(error => {
-	logger.error('Could not initialize commands; reason: ' + error);
-
-	process.exit(1);
-});
-
 const client = new Client();
 
-client.on('message', async message => {
-	const channel = message.channel;
+// Client startup is delayed for 5 seconds to prevent login spam if the program needs to reboot early on (usually only
+// an issue for development environments).
+client.setTimeout(() => {
+	client.login(process.env.DISCORD_APP_TOKEN)
+		.then(() => {
+			logger.info('Bot logged in to Discord servers');
 
-	if (!isChannelWithGuild(channel)) {
-		await channel.send('Sorry, I can only respond to commands sent from within a server.');
+			commands.init(client).catch(error => {
+				logger.error('Could not initialize commands; reason: ' + error);
 
-		return;
-	} else if (message.author === client.user) // ignore messages sent by the bot user
-		return;
+				process.exit(1);
+			});
 
-	let server: ServerInterface;
+			modules.init(client).catch(error => {
+				logger.error('Could not initialize modules; reason: ' + error);
 
-	try {
-		server = await Server.findOne({
-			guildId: channel.guild.id,
-		}).exec();
-	} catch (error) {
-		logger.error('Could not load guild data from database; reason: ' + error);
+				process.exit(1);
+			});
+		})
+		.catch(error => {
+			logger.error('Could not log in to Discord servers; reason: ' + error);
 
-		await message.channel.send('Something went wrong, please try again later.');
-
-		return;
-	}
-
-	if (!server) {
-		server = await new Server({
-			guildId: channel.guild.id,
-		}).save();
-	}
-
-	const [prefix, args] = parseArgsInput(server, message);
-
-	if (prefix !== server.prefix || args.empty)
-		return;
-
-	await commands.execute(args, new CommandContext(message, channel, server));
-});
-
-client.login(process.env.DISCORD_APP_TOKEN)
-	.then(() => {
-		logger.info('Bot logged in to Discord servers');
-
-		autoroleTimer.start(client);
-	})
-	.catch(error => {
-		logger.error('Could not log in to Discord servers; reason: ' + error);
-
-		process.exit(1);
-	});
-
-export function isChannelWithGuild(channel: any): channel is TextChannel | NewsChannel {
-	return typeof channel === 'object' && 'guild' in channel;
-}
+			process.exit(1);
+		});
+}, 5_000);
 
 export function parseArgsInput(server: ServerInterface, message: Message): [string, ArgInput] {
 	if (!client.user)

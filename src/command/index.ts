@@ -1,8 +1,10 @@
-import {Message, NewsChannel, TextChannel} from 'discord.js';
+import {Client, Guild, GuildMember, Message, NewsChannel, TextChannel} from 'discord.js';
 import * as fs from 'fs';
 import path from 'path';
+import {parseArgsInput} from '../index';
 import {logger} from '../logger';
-import {ServerInterface} from '../models/Server';
+import {Server, ServerInterface} from '../models/Server';
+import {isChannelWithGuild} from '../utility/discord';
 import {interpolate} from '../utility/string';
 import {getUnrecognizedCommandMessage} from './messages';
 
@@ -10,7 +12,7 @@ export class ArgInput {
 	protected index = 0;
 
 	public constructor(
-		public readonly args: string[],
+		public readonly input: string[],
 	) {
 	}
 
@@ -25,7 +27,7 @@ export class ArgInput {
 	 * Returns the length of the argument list.
 	 */
 	public get length() {
-		return this.args.length;
+		return this.input.length;
 	}
 
 	/**
@@ -39,14 +41,14 @@ export class ArgInput {
 	 * Returns the value at the current position in the argument list, then advances the position to the next element.
 	 */
 	public next() {
-		return this.args[this.index++];
+		return this.input[this.index++];
 	}
 
 	/**
 	 * Advances the position to the next element, then returns the value at the new position in the argument list.
 	 */
 	public skip() {
-		return this.args[++this.index];
+		return this.input[++this.index];
 	}
 
 	/**
@@ -54,7 +56,7 @@ export class ArgInput {
 	 * is currently at.
 	 */
 	public get current() {
-		return this.args[this.index];
+		return this.input[this.index];
 	}
 
 	public get empty() {
@@ -63,11 +65,16 @@ export class ArgInput {
 }
 
 export class CommandContext {
+	public readonly guild: Guild;
+	public readonly sender: GuildMember;
+
 	public constructor(
 		public readonly message: Message,
 		public readonly channel: TextChannel | NewsChannel,
 		public readonly server: ServerInterface,
 	) {
+		this.guild = channel.guild;
+		this.sender = message.member!;
 	}
 }
 
@@ -145,7 +152,7 @@ type CommandModule = {
 	register: (commands: Commands) => void;
 };
 
-export async function init() {
+export async function init(client: Client) {
 	for (const item of fs.readdirSync(path.join(__dirname, 'commands'))) {
 		const module: CommandModule = await import('./commands/' + path.parse(item).name);
 
@@ -156,9 +163,52 @@ export async function init() {
 	}
 
 	logger.info(`Registered ${registeredCommands.length} command(s)`);
+
+	client.on('message', async message => {
+		const channel = message.channel;
+
+		if (!isChannelWithGuild(channel)) {
+			await channel.send('Sorry, I can only respond to commands sent from within a server.');
+
+			return;
+		} else if (message.author === client.user) // ignore messages sent by the bot user
+			return;
+
+		let server: ServerInterface;
+
+		try {
+			server = await Server.findOne({
+				guildId: channel.guild.id,
+			}).exec();
+		} catch (error) {
+			logger.error('Could not load guild data from database; reason: ' + error);
+
+			await message.channel.send('Something went wrong, please try again later.');
+
+			return;
+		}
+
+		if (!server) {
+			server = await new Server({
+				guildId: channel.guild.id,
+			}).save();
+		}
+
+		const [prefix, args] = parseArgsInput(server, message);
+
+		if (prefix !== server.prefix || args.empty)
+			return;
+
+		logger.debug('Parsed input args', {
+			prefix,
+			args,
+		});
+
+		await execute(args, new CommandContext(message, channel, server));
+	});
 }
 
-export async function execute(args: ArgInput, context: CommandContext): Promise<void> {
+async function execute(args: ArgInput, context: CommandContext): Promise<void> {
 	const keyword = args.next();
 
 	if (!keyword)

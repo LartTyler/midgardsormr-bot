@@ -1,3 +1,4 @@
+import {oneLine, stripIndent} from 'common-tags';
 import {ArgInput, Command, CommandContext, Commands, replaceCommandPrefixPlaceholder} from '../index';
 
 class PrefixCommand implements Command {
@@ -6,11 +7,14 @@ class PrefixCommand implements Command {
 	}
 
 	public getUsage(): string[] {
-		return [':prefix:prefix [<new prefix>]'];
+		return ['prefix [<new prefix>]'];
 	}
 
 	public getSummary(): string {
-		return 'Changes the prefix used by Midgardsormr bot. Useful if you have another bot that conflicts with the default prefix.';
+		return oneLine(stripIndent)`
+			Changes the prefix used by Midgardsormr bot. Useful if you have another bot that conflicts with the default
+			prefix.
+		`;
 	}
 
 	public getHelpText(): string {

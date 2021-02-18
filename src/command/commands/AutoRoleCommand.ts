@@ -1,9 +1,9 @@
-import {stripIndent} from 'common-tags';
 import {MessageEmbed} from 'discord.js';
 import ms from 'ms';
 import {AutoRoleAction, AutoRoleItemNotificationInterface} from '../../models/AutoRoleItem';
+import {DelayParseError, parseDelay} from '../../utility/command';
 import {Emoji, MentionType, parseMention} from '../../utility/discord';
-import {ucfirst} from '../../utility/string';
+import {sections, ucfirst} from '../../utility/string';
 import {ArgInput, Command, CommandContext, Commands, replaceCommandPrefixPlaceholder} from '../index';
 import {getInvalidCommandInvocationMessage, getUnexpectedMentionType, getUnrecognizedCommandMessage} from '../messages';
 
@@ -14,10 +14,10 @@ class AutoRoleCommand implements Command {
 
 	public getUsage(): string[] {
 		return [
-			':prefix:autorole {add | remove} <@role> <delay> [notify <@user | #channel> [<message>]]',
-			':prefix:autorole list',
-			':prefix:autorole delete <index | @role>',
-			':prefix:autorole clear',
+			'autorole {add | remove} <@role> <delay> [notify <@user | #channel> [<message>]]',
+			'autorole list',
+			'autorole delete <index | @role>',
+			'autorole clear',
 		];
 	}
 
@@ -26,26 +26,51 @@ class AutoRoleCommand implements Command {
 	}
 
 	public getHelpText(): string {
-		return stripIndent`
-			**add, remove**
-			Performs the requested action using the specified role. The \`<delay>\` argument can be any positive integer, followed by a unit (such as minutes, hours, etc).
+		return sections([
+			{
+				title: 'add, remove',
+				contents: `
+					Performs the requested action using the specified role. The \`<delay>\` argument can be any
+					positive integer, followed by a unit (such as minutes, hours, etc).
 
-			If the action should be performed immediately when the user joins the server, you can use "immediate" for the delay.
+					If the action should be performed immediately when the user joins the server, you can use
+					"immediate" for the delay.
+				`,
+			},
+			{
+				title: 'list',
+				contents: `
+					Lists all current autorole items. Each line is prefixed with the item's index, which can be used
+					with the **:prefix:autorole delete** command to delete an item.
+				`,
+			},
+			{
+				title: 'delete',
+				contents: `
+					Deletes an item from the autorole settings. The index can be obtained by using the
+					**:prefix:autorole list** command. If a role is provided instead, all items that use that role will
+					be deleted instead.
 
-			**list**
-			Lists all current autorole items. Each line is prefixed with the item's index, which can be used with the **:prefix:autorole delete** command to delete an item.
-
-			**delete**
-			Deletes an item from the autorole settings. The index can be obtained by using the **:prefix:autorole list** command. If a role is provided instead, all items that use that role will be deleted instead.
-
-			Please be aware that deleting an item may cause the index of other items to change, so you should check the output of **:prefix:autorole list** each time you go to run this command.
-
-			**clear**
-			Deletes all items from the autorole configuration.
-		`;
+					Please be aware that deleting an item may cause the index of other items to change, so you should
+					check the output of **:prefix:autorole list** each time you go to run this command.
+				`,
+			},
+			{
+				title: 'clear',
+				contents: `
+					Deletes all items from the autorole configuration.
+				`,
+			},
+		]);
 	}
 
 	public async execute(args: ArgInput, context: CommandContext): Promise<void> {
+		if (!context.sender.hasPermission('MANAGE_ROLES')) {
+			await context.message.reply('You must have the `MANAGE_ROLES` permission to use this command.');
+
+			return;
+		}
+
 		const current = args.next();
 
 		switch (current) {
@@ -95,14 +120,33 @@ class AutoRoleCommand implements Command {
 			return;
 		}
 
-		let delayText = args.next();
+		const role = context.guild.roles.resolve(roleMentionId!);
 
-		// Handles invocations like `add @role 10 minutes` (as opposed to delay and units being merged into one arg,
-		// e.g. `add @role 10mins`)
-		if (args.remaining >= 1 && args.current !== 'notify')
-			delayText += args.next();
+		if (!role) {
+			await context.message.reply('The role you mentioned does not exist.');
 
-		const delay = delayText === 'immediate' ? 0 : ms(delayText);
+			return;
+		} else if (role.comparePositionTo(context.sender.roles.highest) <= 0) {
+			await context.message.reply(
+				'You cannot create an autorole item for a role equal to or higher than your own.',
+			);
+
+			return;
+		}
+
+		let delay: number;
+
+		try {
+			delay = parseDelay(args, ['notify']);
+		} catch (error) {
+			if (error instanceof DelayParseError) {
+				await context.message.reply(error.message);
+
+				return;
+			}
+
+			throw error;
+		}
 
 		if (delay < 0) {
 			await context.message.reply('Autorole delay must be greater than or equal to zero.');
@@ -200,7 +244,7 @@ class AutoRoleCommand implements Command {
 			const remove = context.server.autoRoleItems.filter(item => item.role === mentionId);
 
 			for (const item of remove)
-				item.remove();
+				await item.remove();
 		} else {
 			const index = parseInt(input, 10);
 
@@ -220,7 +264,7 @@ class AutoRoleCommand implements Command {
 				return;
 			}
 
-			context.server.autoRoleItems[index - 1].remove();
+			await context.server.autoRoleItems[index - 1].remove();
 		}
 
 		await context.server.save();
@@ -232,7 +276,11 @@ class AutoRoleCommand implements Command {
 	}
 
 	protected async executeClear(context: CommandContext): Promise<void> {
-		context.server.autoRoleItems.remove();
+		const remove = [...context.server.autoRoleItems];
+
+		for (const item of remove)
+			await item.remove();
+
 		await context.server.save();
 
 		await context.message.react(Emoji.CHECKMARK);

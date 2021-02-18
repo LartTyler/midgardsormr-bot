@@ -14,7 +14,7 @@ class HelpCommand implements Command {
 	}
 
 	public getUsage(): string[] {
-		return [':prefix:help [<command>]'];
+		return ['help [<command>]'];
 	}
 
 	public getSummary(): string {
@@ -67,7 +67,7 @@ class HelpCommand implements Command {
 		lines.push(
 			'**Usage:**',
 			'```',
-			...command.getUsage(),
+			...command.getUsage().map(item => `:prefix:${item}`),
 			'```',
 			command.getSummary(),
 		);

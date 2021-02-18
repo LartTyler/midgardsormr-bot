@@ -1,8 +1,22 @@
-import winston from 'winston';
+import {createLogger, format, transports} from 'winston';
 
-export const logger = winston.createLogger({
+export const logger = createLogger({
 	transports: [
-		new winston.transports.Console(),
+		new transports.Console(),
 	],
-	format: winston.format.printf(log => `[${log.level.toUpperCase()}] ${log.message}`),
+	format: format.combine(
+		format.colorize(),
+		format.splat(),
+		format.metadata(),
+		format.timestamp(),
+		format.printf(info => {
+			let message = `${info.timestamp} [${info.level}] ${info.message}`;
+
+			if (typeof info.metadata == 'object' && Object.keys(info.metadata).length > 0)
+				message += ' ' + JSON.stringify(info.metadata);
+
+			return message;
+		})
+	),
+	level: process.env.LOG_LEVEL ?? 'info',
 });
